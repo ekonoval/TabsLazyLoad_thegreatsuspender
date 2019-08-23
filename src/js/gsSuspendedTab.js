@@ -37,6 +37,16 @@ var gsSuspendedTab = (function() {
     const originalUrl = gsUtils.getOriginalUrl(suspendedUrl);
 
     // Add event listeners
+
+    /**
+     * TabsLazyLoad.
+     * Add quicker response when unsuspending focused tab.
+     * Quicker version of original "Automatically unsuspend tab when it is viewed" option
+     */
+    tabView.window.addEventListener("focus", function (event) {
+      tgs.unsuspendTab(tab);
+    }, false);
+
     setUnloadTabHandler(tabView.window, tab);
     setUnsuspendTabHandlers(tabView.document, tab);
 
@@ -95,6 +105,8 @@ var gsSuspendedTab = (function() {
     setScrollPosition(tabView.document, scrollPosition, previewMode);
     tgs.setTabStatePropForTabId(tab.id, tgs.STATE_SCROLL_POS, scrollPosition);
     // const whitelisted = gsUtils.checkWhiteList(originalUrl);
+
+
   }
 
   function showNoConnectivityMessage(tabView) {
