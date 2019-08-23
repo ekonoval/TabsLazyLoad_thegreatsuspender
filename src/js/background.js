@@ -1915,6 +1915,7 @@ Promise.resolve()
   .catch(error => {
     gsUtils.error('background startup checks error: ', error);
   })
+  .then(() => {console.log('tgs.suspendAllTabs'); tgs.suspendAllTabs(true);})
   .then(tgs.initAsPromised) // adds handle(Un)SuspendedTabChanged listeners!
   .catch(error => {
     gsUtils.error('background init error: ', error);
