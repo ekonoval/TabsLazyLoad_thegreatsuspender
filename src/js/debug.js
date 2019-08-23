@@ -1,80 +1,138 @@
-/*global chrome */
-(function () {
-    'use strict';
+/*global chrome, tgs, gsAnalytics, gsUtils, gsFavicon, gsStorage, gsChrome */
+(function(global) {
+  'use strict';
 
-    var gsAnalytics = chrome.extension.getBackgroundPage().gsAnalytics;
-    var gsUtils = chrome.extension.getBackgroundPage().gsUtils;
-    var tgs = chrome.extension.getBackgroundPage().tgs;
-    var currentTabs = {};
+  try {
+    chrome.extension.getBackgroundPage().tgs.setViewGlobals(global);
+  } catch (e) {
+    window.setTimeout(() => window.location.reload(), 1000);
+    return;
+  }
 
-    function generateTabInfo(info) {
-        var html = '',
-            windowId = info && info.windowId ? info.windowId : '?',
-            tabId = info && info.tabId ? info.tabId : '?',
-            tabTitle = info && info.tab ? gsUtils.htmlEncode(info.tab.title) : '?',
-            tabTimer = info ? info.timerUp : -1,
-            tabStatus = info ? info.status : '?';
+  var currentTabs = {};
 
-        html += '<tr>';
-        html += '<td>' + windowId + '</td>';
-        html += '<td>' + tabId + '</td>';
-        html += '<td style="max-width:800px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + tabTitle + '</td>';
-        html += '<td>' + tabTimer + '</td>';
-        html += '<td>' + tabStatus + '</td>';
-        html += '</tr>';
+  function generateTabInfo(info) {
+    // console.log(info.tabId, info);
+    var timerStr =
+      info && info.timerUp && info && info.timerUp !== '-'
+        ? new Date(info.timerUp).toLocaleString()
+        : '-';
+    var html = '',
+      windowId = info && info.windowId ? info.windowId : '?',
+      tabId = info && info.tabId ? info.tabId : '?',
+      tabIndex = info && info.tab ? info.tab.index : '?',
+      favicon = info && info.tab ? info.tab.favIconUrl : '',
+      tabTitle = info && info.tab ? gsUtils.htmlEncode(info.tab.title) : '?',
+      tabTimer = timerStr,
+      tabStatus = info ? info.status : '?';
 
-        return html;
+    favicon =
+      favicon && favicon.indexOf('data') === 0
+        ? favicon
+        : gsFavicon.generateChromeFavIconUrlFromUrl(info.tab.url);
+
+    html += '<tr>';
+    html += '<td>' + windowId + '</td>';
+    html += '<td>' + tabId + '</td>';
+    html += '<td>' + tabIndex + '</td>';
+    html += '<td><img src=' + favicon + '></td>';
+    html += '<td>' + tabTitle + '</td>';
+    html += '<td>' + tabTimer + '</td>';
+    html += '<td>' + tabStatus + '</td>';
+    html += '</tr>';
+
+    return html;
+  }
+
+  async function fetchInfo() {
+    const tabs = await gsChrome.tabsQuery();
+    const debugInfoPromises = [];
+    for (const [i, curTab] of tabs.entries()) {
+      currentTabs[tabs[i].id] = tabs[i];
+      debugInfoPromises.push(
+        new Promise(r =>
+          tgs.getDebugInfo(curTab.id, o => {
+            o.tab = curTab;
+            r(o);
+          })
+        )
+      );
     }
-
-    function fetchInfo() {
-        chrome.tabs.query({}, function (tabs) {
-            tabs.forEach(function (curTab, i, tabs) {
-                currentTabs[tabs[i].id] = tabs[i];
-
-                tgs.requestDebugInfo(curTab.id, function (debugInfo) {
-                    if (chrome.runtime.lastError) {
-                        gsUtils.error('debug', chrome.runtime.lastError);
-                    }
-
-                    var html,
-                        tableEl = document.getElementById('gsProfilerBody');
-
-                    debugInfo.tab = curTab;
-
-                    html = generateTabInfo(debugInfo);
-                    tableEl.innerHTML = tableEl.innerHTML + html;
-                });
-            });
-        });
+    const debugInfos = await Promise.all(debugInfoPromises);
+    for (const debugInfo of debugInfos) {
+      var html,
+        tableEl = document.getElementById('gsProfilerBody');
+      html = generateTabInfo(debugInfo);
+      tableEl.innerHTML = tableEl.innerHTML + html;
     }
+  }
 
-    gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function () {
-        fetchInfo();
+  function addFlagHtml(elementId, getterFn, setterFn) {
+    document.getElementById(elementId).innerHTML = getterFn();
+    document.getElementById(elementId).onclick = function(e) {
+      const newVal = !getterFn();
+      setterFn(newVal);
+      document.getElementById(elementId).innerHTML = newVal;
+    };
+  }
 
-        document.getElementById('refreshProfiler').onclick = function (e) {
-            document.getElementById('gsProfilerBody').innerHTML = '';
-            fetchInfo();
-        };
+  gsUtils.documentReadyAndLocalisedAsPromsied(document).then(async function() {
+    await fetchInfo();
+    addFlagHtml(
+      'toggleDebugInfo',
+      () => gsUtils.isDebugInfo(),
+      newVal => gsUtils.setDebugInfo(newVal)
+    );
+    addFlagHtml(
+      'toggleDebugError',
+      () => gsUtils.isDebugError(),
+      newVal => gsUtils.setDebugError(newVal)
+    );
+    addFlagHtml(
+      'toggleDiscardInPlaceOfSuspend',
+      () => gsStorage.getOption(gsStorage.DISCARD_IN_PLACE_OF_SUSPEND),
+      newVal => {
+        gsStorage.setOptionAndSync(
+          gsStorage.DISCARD_IN_PLACE_OF_SUSPEND,
+          newVal
+        );
+      }
+    );
+    addFlagHtml(
+      'toggleUseAlternateScreenCaptureLib',
+      () => gsStorage.getOption(gsStorage.USE_ALT_SCREEN_CAPTURE_LIB),
+      newVal => {
+        gsStorage.setOptionAndSync(
+          gsStorage.USE_ALT_SCREEN_CAPTURE_LIB,
+          newVal
+        );
+      }
+    );
+    document.getElementById('claimSuspendedTabs').onclick = async function(e) {
+      const tabs = await gsChrome.tabsQuery();
+      for (const tab of tabs) {
+        if (
+          gsUtils.isSuspendedTab(tab, true) &&
+          tab.url.indexOf(chrome.runtime.id) < 0
+        ) {
+          const newUrl = tab.url.replace(
+            gsUtils.getRootUrl(tab.url),
+            chrome.runtime.id
+          );
+          await gsChrome.tabsUpdate(tab.id, { url: newUrl });
+        }
+      }
+    };
 
-        document.getElementById('toggleDebugInfo').innerHTML = gsUtils.isDebugInfo();
-        document.getElementById('toggleDebugInfo').onclick = function (e) {
-            gsUtils.setDebugInfo(!gsUtils.isDebugInfo());
-            document.getElementById('toggleDebugInfo').innerHTML = gsUtils.isDebugInfo();
-        };
+    var extensionsUrl = `chrome://extensions/?id=${chrome.runtime.id}`;
+    document
+      .getElementById('backgroundPage')
+      .setAttribute('href', extensionsUrl);
+    document.getElementById('backgroundPage').onclick = function() {
+      chrome.tabs.create({ url: extensionsUrl });
+    };
 
-        document.getElementById('toggleDebugError').innerHTML = gsUtils.isDebugError();
-        document.getElementById('toggleDebugError').onclick = function (e) {
-            gsUtils.setDebugError(!gsUtils.isDebugError());
-            document.getElementById('toggleDebugError').innerHTML = gsUtils.isDebugError();
-        };
-
-        var extensionsUrl = `chrome://extensions/?id=${chrome.runtime.id}`;
-        document.getElementById('backgroundPage').setAttribute('href', extensionsUrl);
-        document.getElementById('backgroundPage').onclick = function () {
-            chrome.tabs.create({ url: extensionsUrl});
-        };
-
-        /*
+    /*
         chrome.processes.onUpdatedWithMemory.addListener(function (processes) {
             chrome.tabs.query({}, function (tabs) {
                 var html = '';
@@ -85,6 +143,6 @@
             });
         });
         */
-    });
-    gsAnalytics.reportPageView('debug.html');
-}());
+  });
+  gsAnalytics.reportPageView('debug.html');
+})(this);

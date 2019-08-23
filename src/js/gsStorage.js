@@ -1,756 +1,412 @@
-/*global chrome, localStorage, db, tgs, gsUtils, gsSession, gsAnalytics */
+/*global chrome, gsAnalytics, gsSession, localStorage, gsUtils */
 'use strict';
 
 var gsStorage = {
+  SCREEN_CAPTURE: 'screenCapture',
+  SCREEN_CAPTURE_FORCE: 'screenCaptureForce',
+  SUSPEND_IN_PLACE_OF_DISCARD: 'suspendInPlaceOfDiscard',
+  UNSUSPEND_ON_FOCUS: 'gsUnsuspendOnFocus',
+  SUSPEND_TIME: 'gsTimeToSuspend',
+  IGNORE_WHEN_OFFLINE: 'onlineCheck',
+  IGNORE_WHEN_CHARGING: 'batteryCheck',
+  IGNORE_PINNED: 'gsDontSuspendPinned',
+  IGNORE_FORMS: 'gsDontSuspendForms',
+  IGNORE_AUDIO: 'gsDontSuspendAudio',
+  IGNORE_ACTIVE_TABS: 'gsDontSuspendActiveTabs',
+  IGNORE_CACHE: 'gsIgnoreCache',
+  ADD_CONTEXT: 'gsAddContextMenu',
+  SYNC_SETTINGS: 'gsSyncSettings',
+  NO_NAG: 'gsNoNag',
+  THEME: 'gsTheme',
+  WHITELIST: 'gsWhitelist',
 
-    SCREEN_CAPTURE: 'screenCapture',
-    SCREEN_CAPTURE_FORCE: 'screenCaptureForce',
-    ONLINE_CHECK: 'onlineCheck',
-    BATTERY_CHECK: 'batteryCheck',
-    UNSUSPEND_ON_FOCUS: 'gsUnsuspendOnFocus',
-    SUSPEND_TIME: 'gsTimeToSuspend',
-    IGNORE_PINNED: 'gsDontSuspendPinned',
-    IGNORE_FORMS: 'gsDontSuspendForms',
-    IGNORE_AUDIO: 'gsDontSuspendAudio',
-    IGNORE_CACHE: 'gsIgnoreCache',
-    ADD_CONTEXT: 'gsAddContextMenu',
-    SYNC_SETTINGS: 'gsSyncSettings',
-    NO_NAG: 'gsNoNag',
-    THEME: 'gsTheme',
-    WHITELIST: 'gsWhitelist',
+  DISCARD_AFTER_SUSPEND: 'discardAfterSuspend',
+  DISCARD_IN_PLACE_OF_SUSPEND: 'discardInPlaceOfSuspend',
+  USE_ALT_SCREEN_CAPTURE_LIB: 'useAlternateScreenCaptureLib',
 
-    APP_VERSION: 'gsVersion',
-    LAST_NOTICE: 'gsNotice',
-    LAST_EXTENSION_RECOVERY: 'gsExtensionRecovery',
-    HISTORY_OLD: 'gsHistory',
-    HISTORY: 'gsHistory2',
-    SESSION_HISTORY: 'gsSessionHistory',
+  APP_VERSION: 'gsVersion',
+  LAST_NOTICE: 'gsNotice',
+  LAST_EXTENSION_RECOVERY: 'gsExtensionRecovery',
 
-    DB_SERVER: 'tgs',
-    DB_VERSION: '2',
-    DB_PREVIEWS: 'gsPreviews',
-    DB_SUSPENDED_TABINFO: 'gsSuspendedTabInfo',
-    DB_CURRENT_SESSIONS: 'gsCurrentSessions',
-    DB_SAVED_SESSIONS: 'gsSavedSessions',
-    DB_SESSION_PRE_UPGRADE_KEY: 'preUpgradeVersion',
-    DB_SESSION_POST_UPGRADE_KEY: 'postUpgradeVersion',
+  SM_SESSION_METRICS: 'gsSessionMetrics',
+  SM_TIMESTAMP: 'sessionTimestamp',
+  SM_SUSPENDED_TAB_COUNT: 'suspendedTabCount',
+  SM_TOTAL_TAB_COUNT: 'totalTabCount',
 
-    server: null,
-    noop: function () {},
+  noop: function() {},
 
-    getSettingsDefaults: function () {
+  getSettingsDefaults: function() {
+    const defaults = {};
+    defaults[gsStorage.SCREEN_CAPTURE] = '0';
+    defaults[gsStorage.SCREEN_CAPTURE_FORCE] = false;
+    defaults[gsStorage.SUSPEND_IN_PLACE_OF_DISCARD] = false;
+    defaults[gsStorage.DISCARD_IN_PLACE_OF_SUSPEND] = false;
+    defaults[gsStorage.USE_ALT_SCREEN_CAPTURE_LIB] = false;
+    defaults[gsStorage.DISCARD_AFTER_SUSPEND] = false;
+    defaults[gsStorage.IGNORE_WHEN_OFFLINE] = false;
+    defaults[gsStorage.IGNORE_WHEN_CHARGING] = false;
+    defaults[gsStorage.UNSUSPEND_ON_FOCUS] = false;
+    defaults[gsStorage.IGNORE_PINNED] = true;
+    defaults[gsStorage.IGNORE_FORMS] = true;
+    defaults[gsStorage.IGNORE_AUDIO] = true;
+    defaults[gsStorage.IGNORE_ACTIVE_TABS] = true;
+    defaults[gsStorage.IGNORE_CACHE] = false;
+    defaults[gsStorage.ADD_CONTEXT] = true;
+    defaults[gsStorage.SYNC_SETTINGS] = true;
+    defaults[gsStorage.SUSPEND_TIME] = '60';
+    defaults[gsStorage.NO_NAG] = false;
+    defaults[gsStorage.WHITELIST] = '';
+    defaults[gsStorage.THEME] = 'light';
 
-        var defaults = {};
-        defaults[this.SCREEN_CAPTURE] = '0';
-        defaults[this.SCREEN_CAPTURE_FORCE] = false;
-        defaults[this.ONLINE_CHECK] = false;
-        defaults[this.BATTERY_CHECK] = false;
-        defaults[this.UNSUSPEND_ON_FOCUS] = false;
-        defaults[this.IGNORE_PINNED] = true;
-        defaults[this.IGNORE_FORMS] = true;
-        defaults[this.IGNORE_AUDIO] = true;
-        defaults[this.IGNORE_CACHE] = false;
-        defaults[this.ADD_CONTEXT] = true;
-        defaults[this.SYNC_SETTINGS] = true;
-        defaults[this.SUSPEND_TIME] = '60';
-        defaults[this.NO_NAG] = false;
-        defaults[this.WHITELIST] = '';
-        defaults[this.THEME] = 'light';
+    return defaults;
+  },
 
-        return defaults;
-    },
+  /**
+   * LOCAL STORAGE FUNCTIONS
+   */
 
-    /**
-    * LOCAL STORAGE FUNCTIONS
-    */
+  //populate localstorage settings with sync settings where undefined
+  initSettingsAsPromised: function() {
+    return new Promise(function(resolve) {
+      var defaultSettings = gsStorage.getSettingsDefaults();
+      var defaultKeys = Object.keys(defaultSettings);
+      chrome.storage.sync.get(defaultKeys, function(syncedSettings) {
+        gsUtils.log('gsStorage', 'syncedSettings on init: ', syncedSettings);
+        gsSession.setSynchedSettingsOnInit(syncedSettings);
 
-    //populate localstorage settings with sync settings where undefined
-    initSettings: function () {
-        var self = this;
         var rawLocalSettings;
         try {
-            rawLocalSettings = JSON.parse(localStorage.getItem('gsSettings'));
-        } catch(e) {
-            gsUtils.error('gsStorage', 'Failed to parse gsSettings: ', localStorage.getItem('gsSettings'));
-        }
-        rawLocalSettings = rawLocalSettings || {};
-
-        var defaultSettings = gsStorage.getSettingsDefaults();
-        var defaultKeys = Object.keys(defaultSettings);
-        var unprocessedRawKeys = Object.keys(rawLocalSettings);
-
-        var shouldSyncSettings = rawLocalSettings[self.SYNC_SETTINGS];
-        chrome.storage.sync.get(defaultKeys, function (syncedSettings) {
-            gsUtils.log('gsStorage', 'syncedSettings on init: ', syncedSettings);
-
-            var mergedSettings = {};
-            for (const key of defaultKeys) {
-                // if synced setting exists and local setting does not exist or syncing is turned on
-                // then overwrite with synced value
-                if (key !== self.SYNC_SETTINGS && syncedSettings.hasOwnProperty(key) &&
-                    (!rawLocalSettings.hasOwnProperty(key) || shouldSyncSettings)) {
-                    mergedSettings[key] = syncedSettings[key];
-                }
-                //fallback on rawLocalSettings
-                if (!mergedSettings.hasOwnProperty(key)) {
-                    mergedSettings[key] = rawLocalSettings[key];
-                }
-                //fallback on defaultSettings
-                if (typeof mergedSettings[key] === 'undefined' || mergedSettings[key] === null) {
-                    gsUtils.error('gsStorage', 'Missing key: ' + key + '! Will init with default.');
-                    mergedSettings[key] = defaultSettings[key];
-                }
-                unprocessedRawKeys.splice(unprocessedRawKeys.indexOf(key), 1);
-            }
-            self.saveSettings(mergedSettings);
-
-            // test for settings that don't exist in defaults
-            for (var unprocessedRawKey of unprocessedRawKeys) {
-                gsUtils.error('gsStorage',
-                    'Settings contain unused key: ' + unprocessedRawKey + '! Should this be in defaults?');
-            }
-
-            // if any of the new settings are different to those in sync, then trigger a resync
-            var triggerResync = false;
-            for (const key of defaultKeys) {
-                if (key !== self.SYNC_SETTINGS && syncedSettings[key] !== mergedSettings[key]) {
-                    triggerResync = true;
-                }
-            }
-            if (triggerResync) {
-                self.syncSettings(mergedSettings);
-            }
-        });
-
-        // Listen for changes to synced settings
-        chrome.storage.onChanged.addListener(function (remoteSettings, namespace) {
-            if (namespace !== 'sync' || !remoteSettings) {
-                return;
-            }
-            var shouldSync = self.getOption(self.SYNC_SETTINGS);
-            if (shouldSync) {
-                var localSettings = self.getSettings();
-                var changedSettingKeys = [];
-                Object.keys(remoteSettings).forEach(function (key) {
-                    var remoteSetting = remoteSettings[key];
-                    if (localSettings[key] !== remoteSetting.newValue) {
-                        gsUtils.log('gsStorage', 'Changed value from sync', key, remoteSetting.newValue);
-                        changedSettingKeys.push(key);
-                        localSettings[key] = remoteSetting.newValue;
-                    }
-                });
-
-                if (changedSettingKeys.length > 0) {
-                    self.saveSettings(localSettings);
-                    gsUtils.performPostSaveUpdates(changedSettingKeys);
-                }
-            }
-        });
-    },
-
-    //due to migration issues and new settings being added, i have built in some redundancy
-    //here so that getOption will always return a valid value.
-    getOption: function (prop) {
-        return this.getSettings()[prop];
-    },
-
-    setOption: function (prop, value) {
-        var settings = this.getSettings();
-        settings[prop] = value;
-        // gsUtils.log('gsStorage', 'gsStorage', 'setting prop: ' + prop + ' to value ' + value);
-        this.saveSettings(settings);
-    },
-
-    getSettings: function () {
-        var settings;
-        try {
-            settings = JSON.parse(localStorage.getItem('gsSettings'));
-        } catch(e) {
-            gsUtils.error('gsStorage', 'Failed to parse gsSettings: ', localStorage.getItem('gsSettings'));
-        }
-
-        if (!settings) {
-            settings = this.getSettingsDefaults();
-            this.saveSettings(settings);
-        }
-        return settings;
-    },
-
-    saveSettings: function (settings) {
-        try {
-            localStorage.setItem('gsSettings', JSON.stringify(settings));
-            gsAnalytics.updateDimensions();
+          rawLocalSettings = JSON.parse(localStorage.getItem('gsSettings'));
         } catch (e) {
-            gsUtils.error('gsStorage', 'failed to save gsSettings to local storage', e);
+          gsUtils.error(
+            'gsStorage',
+            'Failed to parse gsSettings: ',
+            localStorage.getItem('gsSettings')
+          );
         }
-    },
+        if (!rawLocalSettings) {
+          rawLocalSettings = {};
+        } else {
+          //if we have some rawLocalSettings but SYNC_SETTINGS is not defined
+          //then define it as FALSE (as opposed to default of TRUE)
+          rawLocalSettings[gsStorage.SYNC_SETTINGS] =
+            rawLocalSettings[gsStorage.SYNC_SETTINGS] || false;
+        }
+        gsUtils.log('gsStorage', 'localSettings on init: ', rawLocalSettings);
+        var shouldSyncSettings = rawLocalSettings[gsStorage.SYNC_SETTINGS];
 
-    // Push settings to sync
-    syncSettings: function () {
-        var settings = this.getSettings();
-        if (settings[this.SYNC_SETTINGS]) {
-            // Since sync is a local setting, delete it to simplify things.
-            delete settings[this.SYNC_SETTINGS];
-            // gsUtils.log('gsStorage', 'gsStorage', 'Pushing local settings to sync', settings);
-            chrome.storage.sync.set(settings, this.noop);
-            if (chrome.runtime.lastError) {
-                gsUtils.error('gsStorage', 'failed to save to chrome.storage.sync: ', chrome.runtime.lastError);
-            }
-        }
-    },
-
-    fetchLastVersion: function () {
-        var version;
-        try {
-            version = JSON.parse(localStorage.getItem(this.APP_VERSION));
-        } catch(e) {
-            gsUtils.error('gsStorage', 'Failed to parse ' + this.APP_VERSION + ': ', localStorage.getItem(this.APP_VERSION));
-        }
-        version = version || '0.0.0';
-        return version + '';
-    },
-    setLastVersion: function (newVersion) {
-        try {
-            localStorage.setItem(this.APP_VERSION, JSON.stringify(newVersion));
-        } catch (e) {
-            gsUtils.error('gsStorage', 'failed to save ' + this.APP_VERSION + ' to local storage', e);
-        }
-    },
-
-    fetchNoticeVersion: function () {
-        var lastNoticeVersion;
-        try {
-            lastNoticeVersion = JSON.parse(localStorage.getItem(this.LAST_NOTICE));
-        } catch(e) {
-            gsUtils.error('gsStorage', 'Failed to parse ' + this.LAST_NOTICE + ': ', localStorage.getItem(this.LAST_NOTICE));
-        }
-        lastNoticeVersion = lastNoticeVersion || '0';
-        return lastNoticeVersion + '';
-    },
-    setNoticeVersion: function (newVersion) {
-        try {
-            localStorage.setItem(this.LAST_NOTICE, JSON.stringify(newVersion));
-        } catch (e) {
-            gsUtils.error('gsStorage', 'failed to save ' + this.LAST_NOTICE + ' to local storage', e);
-        }
-    },
-
-    fetchLastExtensionRecoveryTimestamp: function () {
-        var lastExtensionRecoveryTimestamp;
-        try {
-            lastExtensionRecoveryTimestamp = JSON.parse(localStorage.getItem(this.LAST_EXTENSION_RECOVERY));
-        } catch(e) {
-            gsUtils.error('gsStorage', 'Failed to parse ' + this.LAST_EXTENSION_RECOVERY + ': ', localStorage.getItem(this.LAST_EXTENSION_RECOVERY));
-        }
-        return lastExtensionRecoveryTimestamp;
-    },
-    setLastExtensionRecoveryTimestamp: function (extensionRecoveryTimestamp) {
-        try {
-            localStorage.setItem(this.LAST_EXTENSION_RECOVERY, JSON.stringify(extensionRecoveryTimestamp));
-        } catch (e) {
-            gsUtils.error('gsStorage', 'failed to save ' + this.LAST_EXTENSION_RECOVERY + ' to local storage', e);
-        }
-    },
-
-    /**
-    * INDEXEDDB FUNCTIONS
-    */
-
-    getDb: function () {
-        var self = this;
-        return new Promise(function (resolve, reject) {
-            if (self.server) {
-                resolve(self.server);
+        var mergedSettings = {};
+        for (const key of defaultKeys) {
+          if (key === gsStorage.SYNC_SETTINGS) {
+            if (chrome.extension.inIncognitoContext) {
+              mergedSettings[key] = false;
             } else {
-                db.open({
-                    server: self.DB_SERVER,
-                    version: self.DB_VERSION,
-                    schema: self.getSchema
-                }).then(function (s) {
-                    self.server = s;
-                    resolve(s);
-                });
+              mergedSettings[key] = rawLocalSettings.hasOwnProperty(key)
+                ? rawLocalSettings[key]
+                : defaultSettings[key];
             }
-        });
-    },
-
-    getSchema: function () {
-        // NOTE: Called directly from db.js so 'this' cannot be relied upon
-        return {
-            [gsStorage.DB_PREVIEWS]: {
-                key: {
-                    keyPath: 'id',
-                    autoIncrement: true
-                },
-                indexes: {
-                    id: {},
-                    url: {}
-                }
-            },
-            [gsStorage.DB_SUSPENDED_TABINFO]: {
-                key: {
-                    keyPath: 'id',
-                    autoIncrement: true
-                },
-                indexes: {
-                    id: {},
-                    url: {}
-                }
-            },
-            [gsStorage.DB_CURRENT_SESSIONS]: {
-                key: {
-                    keyPath: 'id',
-                    autoIncrement: true
-                },
-                indexes: {
-                    id: {},
-                    sessionId: {}
-                }
-            },
-            [gsStorage.DB_SAVED_SESSIONS]: {
-                key: {
-                    keyPath: 'id',
-                    autoIncrement: true
-                },
-                indexes: {
-                    id: {},
-                    sessionId: {}
-                }
-            }
-        };
-    },
-
-    fetchPreviewImage: function (tabUrl, callback) {
-        var self = this;
-        callback = typeof callback !== 'function' ? this.noop : callback;
-
-        this.getDb().then(function (s) {
-            return s.query(self.DB_PREVIEWS, 'url')
-                .only(tabUrl)
-                .execute();
-
-        }).then(function (results) {
-            if (results.length > 0) {
-                callback(results[0]);
-            } else {
-                callback(null);
-            }
-        });
-    },
-
-    addPreviewImage: function (tabUrl, previewUrl, callback) {
-        var self = this,
-            server;
-        this.getDb().then(function (s) {
-            server = s;
-            return server.query(self.DB_PREVIEWS, 'url')
-                .only(tabUrl)
-                .execute();
-
-        }).then(function (results) {
-            if (results.length > 0) {
-                return server.remove(self.DB_PREVIEWS, results[0].id);
-            } else {
-                return Promise.resolve();
-            }
-        }).then(function () {
-            server.add(self.DB_PREVIEWS, {url: tabUrl, img: previewUrl});
-            if (typeof callback === 'function') callback();
-        });
-    },
-
-    addSuspendedTabInfo: function (tabProperties, callback) {
-        var self = this,
-            server;
-
-        if (!tabProperties.url) {
-            gsUtils.log('gsStorage', 'tabProperties.url not set.');
-            return;
+            continue;
+          }
+          // If donations are disabled locally, then ensure we disable them on synced profile
+          if (
+            key === gsStorage.NO_NAG &&
+            shouldSyncSettings &&
+            rawLocalSettings.hasOwnProperty(gsStorage.NO_NAG) &&
+            rawLocalSettings[gsStorage.NO_NAG]
+          ) {
+            mergedSettings[gsStorage.NO_NAG] = true;
+            continue;
+          }
+          // if synced setting exists and local setting does not exist or
+          // syncing is enabled locally then overwrite with synced value
+          if (
+            syncedSettings.hasOwnProperty(key) &&
+            (!rawLocalSettings.hasOwnProperty(key) || shouldSyncSettings)
+          ) {
+            mergedSettings[key] = syncedSettings[key];
+          }
+          //fallback on rawLocalSettings
+          if (!mergedSettings.hasOwnProperty(key)) {
+            mergedSettings[key] = rawLocalSettings[key];
+          }
+          //fallback on defaultSettings
+          if (
+            typeof mergedSettings[key] === 'undefined' ||
+            mergedSettings[key] === null
+          ) {
+            gsUtils.errorIfInitialised(
+              'gsStorage',
+              'Missing key: ' + key + '! Will init with default.'
+            );
+            mergedSettings[key] = defaultSettings[key];
+          }
         }
+        gsStorage.saveSettings(mergedSettings);
+        gsUtils.log('gsStorage', 'mergedSettings: ', mergedSettings);
 
-        //first check to see if tabProperties already exists
-        this.getDb().then(function (s) {
-            server = s;
-            return server.query(self.DB_SUSPENDED_TABINFO).filter('url', tabProperties.url).execute();
-
-        }).then(function (results) {
-            if (results.length > 0) {
-                return server.remove(self.DB_SUSPENDED_TABINFO, results[0].id);
-            } else {
-                return Promise.resolve();
-            }
-        }).then(function () {
-            server.add(self.DB_SUSPENDED_TABINFO, tabProperties).then(function () {
-                if (typeof callback === 'function') callback();
-            });
-        });
-    },
-
-    fetchTabInfo: function (tabUrl) {
-        var self = this;
-        return this.getDb().then(function (s) {
-            return s.query(self.DB_SUSPENDED_TABINFO, 'url')
-                .only(tabUrl)
-                .distinct()
-                .desc()
-                .execute()
-                .then(function (results) {
-                    return results.length > 0 ? results[0] : null;
-                });
-        });
-    },
-
-    updateSession: function (session, callback) {
-        var self = this;
-        //if it's a saved session (prefixed with an underscore)
-        var tableName = session.sessionId.indexOf('_') === 0
-            ? self.DB_SAVED_SESSIONS
-            : self.DB_CURRENT_SESSIONS;
-        callback = typeof callback !== 'function' ? self.noop : callback;
-
-        //first check to see if session id already exists
-        self.fetchSessionBySessionId(session.sessionId).then(function (matchingSession) {
-            if (matchingSession) {
-                session.id = matchingSession.id; //copy across id from matching session
-                session.date = (new Date()).toISOString();
-                return self.getDb().then(function (s) {
-                    return s.update(tableName, session); //then update based on that id
-                });
-            } else {
-                return self.getDb().then(function (s) {
-                    return s.add(tableName, session);
-                });
-            }
-        }).then(function (result) {
-            if (result.length > 0) {
-                callback(result[0]);
-            }
-        });
-    },
-
-    fetchCurrentSessions: function () {
-        var self = this;
-        return self.getDb().then(function (s) {
-            return s.query(self.DB_CURRENT_SESSIONS).all().desc().execute();
-        });
-    },
-
-    fetchSessionBySessionId: function (sessionId) {
-
-        //if it's a saved session (prefixed with an underscore)
-        var tableName = sessionId.indexOf('_') === 0
-            ? this.DB_SAVED_SESSIONS
-            : this.DB_CURRENT_SESSIONS;
-
-        return this.getDb().then(function (s) {
-            return s.query(tableName, 'sessionId')
-                .only(sessionId)
-                .desc()
-                .execute()
-                .then(function (results) {
-                    if (results.length > 0) {
-                        // Remove any duplicates!!!
-                        if (results.length > 1) {
-                            gsUtils.error('Duplicate sessions found for sessionId: ' + sessionId + '! Removing older ones..');
-                            for (var session of results.slice(1)) {
-                                s.remove(tableName, session.id).then((res) => {
-                                });
-                            }
-                        }
-                        return results[0];
-                    } else {
-                        return null;
-                    }
-                });
-        });
-    },
-
-    createSessionRestorePoint: function (currentVersion, newVersion) {
-        var currentSession;
-        var currentSessionId = gsSession.getSessionId();
-        return this.fetchSessionBySessionId(currentSessionId).then(function (session) {
-            currentSession = session;
-            return gsStorage.fetchCurrentSessions();
-        }).then(function (sessions) {
-            if (!currentSession && sessions && sessions.length > 0) {
-                currentSession = sessions[0];
-            }
-            if (currentSession) {
-                currentSession.name = 'Automatic save point for v' + currentVersion;
-                currentSession[gsStorage.DB_SESSION_PRE_UPGRADE_KEY] = currentVersion;
-                currentSession[gsStorage.DB_SESSION_POST_UPGRADE_KEY] = newVersion;
-                return gsStorage.addToSavedSessions(currentSession);
-            }
-        }).then(function () {
-            return currentSession;
-        });
-    },
-
-    fetchSessionRestorePoint: function (versionKey, versionValue) {
-        var tableName = this.DB_SAVED_SESSIONS;
-        return this.getDb().then(function (s) {
-            return s.query(tableName)
-                .filter(versionKey, versionValue)
-                .distinct()
-                .execute()
-                .then(function (results) {
-                    return results.length > 0 ? results[0] : null;
-                });
-        });
-    },
-
-    fetchLastSession: function () {
-        var self = this,
-            currentSessionId,
-            lastSession = null;
-
-        currentSessionId = gsSession.getSessionId();
-        return this.getDb().then(function (s) {
-            return s.query(self.DB_CURRENT_SESSIONS, 'id')
-                .all()
-                .desc()
-                .execute()
-                .then(function (results) {
-
-                    if (results.length > 0) {
-                        results.some(function (curSession) {
-
-                            //don't want to match on current session
-                            if (curSession.sessionId !== currentSessionId) {
-                                lastSession = curSession;
-                                return true;
-                            }
-                        });
-                        return lastSession;
-
-                    } else {
-                        return null;
-                    }
-                });
-        });
-    },
-
-    fetchSavedSessions: function () {
-        var self = this;
-        return this.getDb().then(function (s) {
-            return s.query(self.DB_SAVED_SESSIONS).all().execute();
-        });
-    },
-
-    addToSavedSessions: function (session, callback) {
-        callback = typeof callback !== 'function' ? this.noop : callback;
-
-        //if sessionId does not already have an underscore prefix then generate a new unique sessionId for this saved session
-        if (session.sessionId.indexOf('_') < 0) {
-            session.sessionId = '_' + gsUtils.generateHashCode(session.name);
+        // if any of the new settings are different to those in sync, then trigger a resync
+        var triggerResync = false;
+        for (const key of defaultKeys) {
+          if (
+            key !== gsStorage.SYNC_SETTINGS &&
+            syncedSettings[key] !== mergedSettings[key]
+          ) {
+            triggerResync = true;
+          }
         }
-
-        //clear id as it will be either readded (if sessionId match found) or generated (if creating a new session)
-        delete session.id;
-
-        this.updateSession(session, callback);
-    },
-
-    clearGsSessions: function () {
-        var self = this;
-
-        this.getDb().then(function (s) {
-            s.clear(self.DB_CURRENT_SESSIONS);
-        });
-    },
-
-    removeTabFromSessionHistory: function (sessionId, windowId, tabId, callback) {
-
-        var self = this,
-            matched;
-
-        callback = typeof callback !== 'function' ? this.noop : callback;
-
-        this.fetchSessionBySessionId(sessionId).then(function (gsSession) {
-
-            gsSession.windows.some(function (curWindow, windowIndex) {
-                matched = curWindow.tabs.some(function (curTab, tabIndex) {
-                    //leave this as a loose matching as sometimes it is comparing strings. other times ints
-                    if (curTab.id == tabId || curTab.url == tabId) { // eslint-disable-line eqeqeq
-                        curWindow.tabs.splice(tabIndex, 1);
-                        return true;
-                    }
-                });
-                if (matched) {
-                    //remove window if it no longer contains any tabs
-                    if (curWindow.tabs.length === 0) {
-                        gsSession.windows.splice(windowIndex, 1);
-                    }
-                    return true;
-                }
-            });
-
-            //update session
-            if (gsSession.windows.length > 0) {
-                self.updateSession(gsSession, function (session) {
-                    callback(session);
-                });
-
-            //or remove session if it no longer contains any windows
-            } else {
-                self.removeSessionFromHistory(sessionId, function (session) {
-                    callback();
-                });
-            }
-        });
-    },
-
-    removeSessionFromHistory: function (sessionId, callback) {
-
-        var server,
-            session,
-            tableName = sessionId.indexOf('_') === 0
-                ? this.DB_SAVED_SESSIONS
-                : this.DB_CURRENT_SESSIONS;
-
-        callback = typeof callback !== 'function' ? this.noop : callback;
-
-        this.getDb().then(function (s) {
-            server = s;
-            return server.query(tableName).filter('sessionId', sessionId).execute();
-
-        }).then(function (result) {
-            if (result.length > 0) {
-                session = result[0];
-                server.remove(tableName, session.id);
-            }
-        }).then(callback);
-    },
-
-    trimDbItems: function () {
-        var self = this,
-            server,
-            maxTabItems = 1000,
-            maxHistories = 5,
-            itemsToRemove,
-            i;
-
-        this.getDb().then(function (s) {
-            server = s;
-            return server.query(self.DB_SUSPENDED_TABINFO, 'id')
-                .all()
-                .keys()
-                .execute();
-
-        //trim suspendedTabInfo
-        }).then(function (results) {
-
-            //if there are more than maxTabItems items, then remove the oldest ones
-            if (results.length > maxTabItems) {
-                itemsToRemove = results.length - maxTabItems;
-                for (i = 0; i < itemsToRemove; i++) {
-                    server.remove(self.DB_SUSPENDED_TABINFO, results[i]);
-                }
-            }
-
-            return server.query(self.DB_PREVIEWS, 'id')
-                .all()
-                .keys()
-                .execute();
-
-        //trim imagePreviews
-        }).then(function (results) {
-
-            //if there are more than maxTabItems items, then remove the oldest ones
-            if (results.length > maxTabItems) {
-                itemsToRemove = results.length - maxTabItems;
-                for (i = 0; i < itemsToRemove; i++) {
-                    server.remove(self.DB_PREVIEWS, results[i]);
-                }
-            }
-
-            return server.query(self.DB_CURRENT_SESSIONS, 'id')
-                .all()
-                .keys()
-                .execute();
-
-        //trim currentSessions
-        }).then(function (results) {
-
-            //if there are more than maxHistories items, then remove the oldest ones
-            if (results.length > maxHistories) {
-                itemsToRemove = results.length - maxHistories;
-                for (i = 0; i < itemsToRemove; i++) {
-                    server.remove(self.DB_CURRENT_SESSIONS, results[i]);
-                }
-            }
-        });
-    },
-
-    /**
-    * MIGRATIONS
-    */
-
-    performMigration: function (oldVersion) {
-
-        var self = this,
-            server;
-
-        var major = parseInt(oldVersion.split('.')[0] || 0),
-            minor = parseInt(oldVersion.split('.')[1] || 0);
-            // patch = parseInt(oldVersion.split('.')[2] || 0);
-
-        //perform migrated history fixup
-        if (major < 6 || (major === 6 && minor < 13)) { // if (oldVersion < 6.13)
-
-            //fix up migrated saved session and newly saved session sessionIds
-            this.getDb().then(function (s) {
-                server = s;
-                return s.query(self.DB_SAVED_SESSIONS).all().execute();
-
-            }).then(function (savedSessions) {
-                savedSessions.forEach(function (session, index) {
-                    if (session.id === 7777) {
-                        session.sessionId = '_7777';
-                        session.name = 'Recovered tabs';
-                        session.date = (new Date(session.date)).toISOString();
-                    } else {
-                        session.sessionId = '_' + gsUtils.generateHashCode(session.name);
-                    }
-                    server.update(self.DB_SAVED_SESSIONS, session);
-                });
-            });
+        if (triggerResync) {
+          gsStorage.syncSettings();
         }
-        if (major < 6 || (major === 6 && minor < 30)) { // if (oldVersion < 6.30)
+        gsStorage.addSettingsSyncListener();
+        gsUtils.log('gsStorage', 'init successful');
+        resolve();
+      });
+    });
+  },
 
-            if (this.getOption('preview')) {
-                if (this.getOption('previewQuality') === '0.1') {
-                    this.setOption(this.SCREEN_CAPTURE, '1');
-                } else {
-                    this.setOption(this.SCREEN_CAPTURE, '2');
-                }
-            } else {
-                this.setOption(this.SCREEN_CAPTURE, '0');
+  // Listen for changes to synced settings
+  addSettingsSyncListener: function() {
+    chrome.storage.onChanged.addListener(function(remoteSettings, namespace) {
+      if (namespace !== 'sync' || !remoteSettings) {
+        return;
+      }
+      var shouldSync = gsStorage.getOption(gsStorage.SYNC_SETTINGS);
+      if (shouldSync) {
+        var localSettings = gsStorage.getSettings();
+        var changedSettingKeys = [];
+        var oldValueBySettingKey = {};
+        var newValueBySettingKey = {};
+        Object.keys(remoteSettings).forEach(function(key) {
+          var remoteSetting = remoteSettings[key];
+
+          // If donations are disabled locally, then ensure we disable them on synced profile
+          if (key === gsStorage.NO_NAG) {
+            if (remoteSetting.newValue === false) {
+              return false; // don't process this key
             }
-        }
-        if (major < 6 || (major === 6 && minor < 31)) { // if (oldVersion < 6.31)
-            // When migrating old settings, disable sync by default.
-            // For new installs, we want this to default to on.
-            this.setOption(this.SYNC_SETTINGS, false);
+          }
 
-            chrome.cookies.getAll({}, function (cookies) {
-                var scrollPosByTabId = {};
-                cookies.forEach(function (cookie) {
-                    if (cookie.name.indexOf('gsScrollPos') === 0) {
-                        if (cookie.value && cookie.value !== '0') {
-                            var tabId = cookie.name.substr(12);
-                            scrollPosByTabId[tabId] = cookie.value;
-                        }
-                        var prefix = cookie.secure ? 'https://' : 'http://';
-                        if (cookie.domain.charAt(0) === '.') {
-                            prefix += 'www';
-                        }
-                        var url = prefix + cookie.domain + cookie.path;
-                        chrome.cookies.remove({ 'url': url, 'name': cookie.name });
-                    }
-                });
-                tgs.scrollPosByTabId = scrollPosByTabId;
-            });
+          if (localSettings[key] !== remoteSetting.newValue) {
+            gsUtils.log(
+              'gsStorage',
+              'Changed value from sync',
+              key,
+              remoteSetting.newValue
+            );
+            changedSettingKeys.push(key);
+            oldValueBySettingKey[key] = localSettings[key];
+            newValueBySettingKey[key] = remoteSetting.newValue;
+            localSettings[key] = remoteSetting.newValue;
+          }
+        });
+
+        if (changedSettingKeys.length > 0) {
+          gsStorage.saveSettings(localSettings);
+          gsUtils.performPostSaveUpdates(
+            changedSettingKeys,
+            oldValueBySettingKey,
+            newValueBySettingKey
+          );
         }
+      }
+    });
+  },
+
+  //due to migration issues and new settings being added, i have built in some redundancy
+  //here so that getOption will always return a valid value.
+  getOption: function(prop) {
+    var settings = gsStorage.getSettings();
+    if (typeof settings[prop] === 'undefined' || settings[prop] === null) {
+      settings[prop] = gsStorage.getSettingsDefaults()[prop];
+      gsStorage.saveSettings(settings);
     }
+    return settings[prop];
+  },
+
+  setOption: function(prop, value) {
+    var settings = gsStorage.getSettings();
+    settings[prop] = value;
+    // gsUtils.log('gsStorage', 'gsStorage', 'setting prop: ' + prop + ' to value ' + value);
+    gsStorage.saveSettings(settings);
+  },
+
+  // Important to note that setOption (and ultimately saveSettings) uses localStorage whereas
+  // syncSettings saves to chrome.storage.
+  // Calling syncSettings has the unfortunate side-effect of triggering the chrome.storage.onChanged
+  // listener which the re-saves the setting to localStorage a second time.
+  setOptionAndSync: function(prop, value) {
+    gsStorage.setOption(prop, value);
+    gsStorage.syncSettings();
+  },
+
+  getSettings: function() {
+    var settings;
+    try {
+      settings = JSON.parse(localStorage.getItem('gsSettings'));
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'Failed to parse gsSettings: ',
+        localStorage.getItem('gsSettings')
+      );
+    }
+    if (!settings) {
+      settings = gsStorage.getSettingsDefaults();
+      gsStorage.saveSettings(settings);
+    }
+    return settings;
+  },
+
+  saveSettings: function(settings) {
+    try {
+      localStorage.setItem('gsSettings', JSON.stringify(settings));
+      gsAnalytics.setUserDimensions();
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'failed to save gsSettings to local storage',
+        e
+      );
+    }
+  },
+
+  // Push settings to sync
+  syncSettings: function() {
+    var settings = gsStorage.getSettings();
+    if (settings[gsStorage.SYNC_SETTINGS]) {
+      // Since sync is a local setting, delete it to simplify things.
+      delete settings[gsStorage.SYNC_SETTINGS];
+      gsUtils.log(
+        'gsStorage',
+        'gsStorage',
+        'Pushing local settings to sync',
+        settings
+      );
+      chrome.storage.sync.set(settings, () => {
+        if (chrome.runtime.lastError) {
+          gsUtils.error(
+            'gsStorage',
+            'failed to save to chrome.storage.sync: ',
+            chrome.runtime.lastError
+          );
+        }
+      });
+    }
+  },
+
+  fetchLastVersion: function() {
+    var version;
+    try {
+      version = JSON.parse(localStorage.getItem(gsStorage.APP_VERSION));
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'Failed to parse ' + gsStorage.APP_VERSION + ': ',
+        localStorage.getItem(gsStorage.APP_VERSION)
+      );
+    }
+    version = version || '0.0.0';
+    return version + '';
+  },
+  setLastVersion: function(newVersion) {
+    try {
+      localStorage.setItem(gsStorage.APP_VERSION, JSON.stringify(newVersion));
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'failed to save ' + gsStorage.APP_VERSION + ' to local storage',
+        e
+      );
+    }
+  },
+
+  fetchNoticeVersion: function() {
+    var lastNoticeVersion;
+    try {
+      lastNoticeVersion = JSON.parse(
+        localStorage.getItem(gsStorage.LAST_NOTICE)
+      );
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'Failed to parse ' + gsStorage.LAST_NOTICE + ': ',
+        localStorage.getItem(gsStorage.LAST_NOTICE)
+      );
+    }
+    lastNoticeVersion = lastNoticeVersion || '0';
+    return lastNoticeVersion + '';
+  },
+  setNoticeVersion: function(newVersion) {
+    try {
+      localStorage.setItem(gsStorage.LAST_NOTICE, JSON.stringify(newVersion));
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'failed to save ' + gsStorage.LAST_NOTICE + ' to local storage',
+        e
+      );
+    }
+  },
+
+  fetchLastExtensionRecoveryTimestamp: function() {
+    var lastExtensionRecoveryTimestamp;
+    try {
+      lastExtensionRecoveryTimestamp = JSON.parse(
+        localStorage.getItem(gsStorage.LAST_EXTENSION_RECOVERY)
+      );
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'Failed to parse ' + gsStorage.LAST_EXTENSION_RECOVERY + ': ',
+        localStorage.getItem(gsStorage.LAST_EXTENSION_RECOVERY)
+      );
+    }
+    return lastExtensionRecoveryTimestamp;
+  },
+  setLastExtensionRecoveryTimestamp: function(extensionRecoveryTimestamp) {
+    try {
+      localStorage.setItem(
+        gsStorage.LAST_EXTENSION_RECOVERY,
+        JSON.stringify(extensionRecoveryTimestamp)
+      );
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'failed to save ' +
+          gsStorage.LAST_EXTENSION_RECOVERY +
+          ' to local storage',
+        e
+      );
+    }
+  },
+
+  fetchSessionMetrics: function() {
+    var sessionMetrics = {};
+    try {
+      sessionMetrics = JSON.parse(
+        localStorage.getItem(gsStorage.SM_SESSION_METRICS)
+      );
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'Failed to parse ' + gsStorage.SM_SESSION_METRICS + ': ',
+        localStorage.getItem(gsStorage.SM_SESSION_METRICS)
+      );
+    }
+    return sessionMetrics;
+  },
+  setSessionMetrics: function(sessionMetrics) {
+    try {
+      localStorage.setItem(
+        gsStorage.SM_SESSION_METRICS,
+        JSON.stringify(sessionMetrics)
+      );
+    } catch (e) {
+      gsUtils.error(
+        'gsStorage',
+        'failed to save ' + gsStorage.SM_SESSION_METRICS + ' to local storage',
+        e
+      );
+    }
+  },
 };

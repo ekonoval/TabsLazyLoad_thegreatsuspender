@@ -1,40 +1,82 @@
-/*global chrome, historyUtils */
-(function () {
-    'use strict';
+/*global chrome, historyUtils, gsSession, gsIndexedDb, gsUtils */
+(function(global) {
+  'use strict';
 
-    var gsStorage = chrome.extension.getBackgroundPage().gsStorage;
-    var gsUtils = chrome.extension.getBackgroundPage().gsUtils;
+  try {
+    chrome.extension.getBackgroundPage().tgs.setViewGlobals(global);
+  } catch (e) {
+    window.setTimeout(() => window.location.reload(), 1000);
+    return;
+  }
 
-    gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function () {
+  function setRestartExtensionClickHandler(warnFirst) {
+    document.getElementById('restartExtensionBtn').onclick = async function(e) {
+      // var result = true;
+      // if (warnFirst) {
+      //   result = window.confirm(chrome.i18n.getMessage('js_update_confirm'));
+      // }
+      // if (result) {
 
-        document.getElementById('sessionManagerLink').onclick = function (e) {
-            e.preventDefault();
-            chrome.tabs.create({ url: chrome.extension.getURL('history.html') });
-        };
-        document.getElementById('restartExtensionBtn').onclick = function (e) {
-            var result = window.confirm(chrome.i18n.getMessage('js_update_confirm'));
-            if (result) {
-                chrome.runtime.reload();
-            }
-        };
+      document.getElementById('restartExtensionBtn').className += ' btnDisabled';
+      document.getElementById('restartExtensionBtn').onclick = null;
 
+      const currentSession = await gsSession.buildCurrentSession();
+      if (currentSession) {
         var currentVersion = chrome.runtime.getManifest().version;
-        gsStorage.fetchSessionRestorePoint(gsStorage.DB_SESSION_PRE_UPGRADE_KEY, currentVersion)
-            .then(function (sessionRestorePoint) {
-                if (!sessionRestorePoint) {
-                    gsUtils.log('update', 'Couldnt find session restore point. Something has gone horribly wrong!!');
-                    document.getElementById('noBackupInfo').style.display = 'block';
-                    document.getElementById('backupInfo').style.display = 'none';
-                    document.getElementById('exportBackupBtn').style.display = 'none';
-                } else {
-                    document.getElementById('exportBackupBtn').onclick = function (e) {
-                        historyUtils.exportSession(sessionRestorePoint.sessionId);
-                        document.getElementById('exportBackupBtn').style.display = 'none';
-                        document.getElementById('restartExtensionBtn').onclick = function (e) {
-                            chrome.runtime.reload();
-                        };
-                    };
-                }
-            });
-    });
-}());
+        await gsIndexedDb.createOrUpdateSessionRestorePoint(
+          currentSession,
+          currentVersion
+        );
+      }
+
+      //ensure we don't leave any windows with no unsuspended tabs
+      await gsSession.unsuspendActiveTabInEachWindow();
+
+      //update current session to ensure the new tab ids are saved before
+      //we restart the extension
+      await gsSession.updateCurrentSession();
+
+      chrome.runtime.reload();
+      // }
+    };
+  }
+
+  function setExportBackupClickHandler() {
+    document.getElementById('exportBackupBtn').onclick = async function(e) {
+      const currentSession = await gsSession.buildCurrentSession();
+      historyUtils.exportSession(currentSession, function() {
+        document.getElementById('exportBackupBtn').style.display = 'none';
+        setRestartExtensionClickHandler(false);
+      });
+    };
+  }
+
+  function setSessionManagerClickHandler() {
+    document.getElementById('sessionManagerLink').onclick = function(e) {
+      e.preventDefault();
+      chrome.tabs.create({ url: chrome.extension.getURL('history.html') });
+      setRestartExtensionClickHandler(false);
+    };
+  }
+
+  gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function() {
+    setSessionManagerClickHandler();
+    setRestartExtensionClickHandler(true);
+    setExportBackupClickHandler();
+
+    var currentVersion = chrome.runtime.getManifest().version;
+    gsIndexedDb
+      .fetchSessionRestorePoint(currentVersion)
+      .then(function(sessionRestorePoint) {
+        if (!sessionRestorePoint) {
+          gsUtils.warning(
+            'update',
+            'Couldnt find session restore point. Something has gone horribly wrong!!'
+          );
+          document.getElementById('noBackupInfo').style.display = 'block';
+          document.getElementById('backupInfo').style.display = 'none';
+          document.getElementById('exportBackupBtn').style.display = 'none';
+        }
+      });
+  });
+})(this);

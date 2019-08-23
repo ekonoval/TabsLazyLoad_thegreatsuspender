@@ -1,22 +1,29 @@
-/*global chrome */
-(function () {
-    'use strict';
+/*global chrome, tgs, gsAnalytics, gsStorage, gsUtils */
+(function(global) {
+  'use strict';
 
-    var tgs = chrome.extension.getBackgroundPage().tgs;
-    var gsAnalytics = chrome.extension.getBackgroundPage().gsAnalytics;
-    var gsStorage = chrome.extension.getBackgroundPage().gsStorage;
-    var gsUtils = chrome.extension.getBackgroundPage().gsUtils;
+  try {
+    chrome.extension.getBackgroundPage().tgs.setViewGlobals(global);
+  } catch (e) {
+    window.setTimeout(() => window.location.reload(), 1000);
+    return;
+  }
 
-    gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function () {
-        var notice = tgs.requestNotice();
-        var noticeContentEl = document.getElementById('gsNotice');
-        noticeContentEl.innerHTML = notice.text;
+  gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function() {
+    var notice = tgs.requestNotice();
+    if (
+      notice &&
+      notice.hasOwnProperty('text') &&
+      notice.hasOwnProperty('version')
+    ) {
+      var noticeContentEl = document.getElementById('gsNotice');
+      noticeContentEl.innerHTML = notice.text;
+      //update local notice version
+      gsStorage.setNoticeVersion(notice.version);
+    }
 
-        //clear notice (to prevent it showing again)
-        tgs.clearNotice();
-
-        //update local notice version
-        gsStorage.setNoticeVersion(notice.version);
-    });
-    gsAnalytics.reportPageView('notice.html');
-}());
+    //clear notice (to prevent it showing again)
+    tgs.clearNotice();
+  });
+  gsAnalytics.reportPageView('notice.html');
+})(this);
