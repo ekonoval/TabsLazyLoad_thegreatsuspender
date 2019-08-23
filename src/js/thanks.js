@@ -1,12 +1,16 @@
-/*global chrome */
-(function () {
-    'use strict';
+/*global chrome, gsAnalytics, gsUtils */
+(function(global) {
+  'use strict';
 
-    var gsAnalytics = chrome.extension.getBackgroundPage().gsAnalytics;
-    var gsUtils = chrome.extension.getBackgroundPage().gsUtils;
+  try {
+    chrome.extension.getBackgroundPage().tgs.setViewGlobals(global);
+  } catch (e) {
+    window.setTimeout(() => window.location.reload(), 1000);
+    return;
+  }
 
-    gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function () {
-        //do nothing
-    });
-    gsAnalytics.reportPageView('thanks.html');
-}());
+  gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function() {
+    //do nothing
+  });
+  gsAnalytics.reportPageView('thanks.html');
+})(this);

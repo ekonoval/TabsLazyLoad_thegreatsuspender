@@ -1,33 +1,49 @@
-/*global chrome */
-(function () {
-    'use strict';
+/*global chrome, gsAnalytics, gsUtils */
+(function(global) {
+  'use strict';
 
-    var gsAnalytics = chrome.extension.getBackgroundPage().gsAnalytics;
-    var gsUtils = chrome.extension.getBackgroundPage().gsUtils;
+  try {
+    chrome.extension.getBackgroundPage().tgs.setViewGlobals(global);
+  } catch (e) {
+    window.setTimeout(() => window.location.reload(), 1000);
+    return;
+  }
 
-    gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function () {
-        var shortcutsEl = document.getElementById('keyboardShortcuts'),
-            configureShortcutsEl = document.getElementById('configureShortcuts'),
-            count = 0;
+  gsUtils.documentReadyAndLocalisedAsPromsied(document).then(function() {
+    var shortcutsEl = document.getElementById('keyboardShortcuts');
+    var configureShortcutsEl = document.getElementById('configureShortcuts');
 
-        //populate keyboard shortcuts
-        chrome.commands.getAll(function (commands) {
+    var notSetMessage = chrome.i18n.getMessage('js_shortcuts_not_set');
+    var groupingKeys = [
+      '2-toggle-temp-whitelist-tab',
+      '2b-unsuspend-selected-tabs',
+      '4-unsuspend-active-window',
+    ];
 
-            commands.forEach(function (command) {
-                if (command.name !== '_execute_browser_action' && command.name !== '2-unsuspend-tab') {
-                    var shortcut = command.shortcut !== '' ? command.shortcut : '(' + chrome.i18n.getMessage('js_shortcuts_not_set') + ')';
-                    var style = count % 2 === 0 ? '"margin: 0 0 2px;"' : '';
-                    shortcutsEl.innerHTML += '<p style=' + style + '>' + command.description + ': ' + shortcut + '</p>';
-                    count++;
-                }
-            });
-        });
-
-        //listener for configureShortcuts
-        configureShortcutsEl.onclick = function (e) {
-            chrome.tabs.update({url: 'chrome://extensions/configureCommands'});
-        };
+    //populate keyboard shortcuts
+    chrome.commands.getAll(commands => {
+      commands.forEach(command => {
+        if (command.name !== '_execute_browser_action') {
+          const shortcut =
+            command.shortcut !== ''
+              ? gsUtils.formatHotkeyString(command.shortcut)
+              : '(' + notSetMessage + ')';
+          var addMarginBottom = groupingKeys.includes(command.name);
+          shortcutsEl.innerHTML += `<div ${
+            addMarginBottom ? ' class="bottomMargin"' : ''
+          }>${command.description}</div>
+            <div class="${
+              command.shortcut ? 'hotkeyCommand' : 'lesserText'
+            }">${shortcut}</div>`;
+        }
+      });
     });
 
-    gsAnalytics.reportPageView('shortcuts.html');
-}());
+    //listener for configureShortcuts
+    configureShortcutsEl.onclick = function(e) {
+      chrome.tabs.update({ url: 'chrome://extensions/shortcuts' });
+    };
+  });
+
+  gsAnalytics.reportPageView('shortcuts.html');
+})(this);
